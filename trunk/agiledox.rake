@@ -1,3 +1,7 @@
+#version 0.1
+#grosser.michael>AT<gmail>DOT<com
+#code.google.com/p/agiledox-rake
+
 namespace :dox do
   def indefinite_article(word)
     (word.to_s.downcase =~ /^[aeoi]/) ? 'An' : 'A'
@@ -23,10 +27,12 @@ namespace :dox do
     return false
   end
   
+  #write the comment block to the file in app
+  #if the file exists
   def write_comment file, lines
     #target file exists ?
     file = test_file_to_app_file file
-    return if file == false
+    return if file == false #could not translate to app file
     
    if !File.exists?(file) 
       puts "File: #{file} not found for comment insertion"
@@ -55,7 +61,7 @@ namespace :dox do
     tests.each do |file|
       lines = []
       
-      #captureing and printing
+      #process lines
       File.foreach(file) do |line|
         case line
           when /^\s*class ([A-Za-z]+)Test/
@@ -64,8 +70,8 @@ namespace :dox do
             lines << "  - #{$1.gsub(/_/, ' ')}" 
         end
       end
-      print_out lines
       
+      print_out lines
       write_comment file, lines
     end
   end
@@ -74,30 +80,31 @@ namespace :dox do
     tests = FileList['test/functional/*_test.rb']
     classes = {}
     current_class = nil
-    print_actions = lambda do |actions|
-      actions.each do |action, tests|
-        puts "  '#{action}' action:" 
-        tests.each {|test| puts "    - #{test}"}
-      end
-    end
 
+    #collect dox for every action
     tests.each do |file|
+      lines = []
+      actions = {}
+      
+      #process lines
       File.foreach(file) do |line|
         case line
           when /^\s*class ([A-Za-z]+)Test/
-            classes[$1] = {}
-            current_class = $1
+            lines << class_name($1 + "'s")
           when /^\s*def test_([A-Za-z]+)_([A-Za-z_]+)/
-            classes[current_class][$1] ||= []
-            classes[current_class][$1] << $2.gsub(/_/, ' ')
+            actions[$1] ||= []
+            actions[$1] << $2.gsub(/_/, ' ')
         end
       end
-    end
-    classes.each do |class_name, actions|
-      next if actions.nil? || actions.empty?
-
-      print_class_name(class_name + "'s")
-      print_actions.call actions
+      
+      #collect action results
+      actions.each do |action,tests|
+        lines << "  '#{action}' action:" 
+        tests.each {|test| lines << "    - #{test}"}
+      end
+      
+      print_out lines
+      write_comment file,lines
     end
   end
 end
