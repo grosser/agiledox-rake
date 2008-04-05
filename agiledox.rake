@@ -1,12 +1,76 @@
-#version 0.2
+#version 0.3
 #grosser.michael>AT<gmail>DOT<com
 #code.google.com/p/agiledox-rake
+agiledox_options = {
+  :write => true,
+  :list_nested_actions => true, #for test:functionals
+}
+
 
 class AgileDox
   def initialize options
     @options = options
   end
   
+  def process_tests file_selector
+    tests = FileList[file_selector]
+    tests.each do |file|
+      lines = []
+      
+      #process lines
+      File.foreach(file) do |line|
+        string_rex = '(\'|"){0,1}(.*?)\\1{0,1}'#matches User and '"my" User'
+        case line
+           #test
+          when /^\s*class ([^\s]+)Test/
+            lines << class_name($1)
+          when /^\s*def test_([^\s]+)/
+            lines << "  - #{$1.gsub(/_/, ' ')}"
+            
+           #spec
+          when /^\s*describe #{string_rex} do/
+            lines << class_name($2)
+          when /^\s*it #{string_rex} do/
+            lines << "  - #{$2}"
+        end
+      end
+      
+      print_out lines
+      write_comment_block file, lines
+    end
+  end
+
+  def process_tests_with_nested_actions file_selector
+    test_files = FileList[file_selector]
+    #collect dox for every action
+    test_files.each do |file|
+      lines = []
+      actions = {}
+      
+      #process lines
+      File.foreach(file) do |line|
+        case line
+          when /^\s*class ([^\s_]+)Test/
+            lines << class_name($1 + "'s")
+          when /^\s*def test_([^\s_]+)_([^\s]+)/
+            actions[$1] ||= []
+            actions[$1] << $2.gsub(/_/, ' ')
+        end
+      end
+      
+      #collect action results
+      actions.each do |action,tests|
+        lines << "  '#{action}' action:" 
+        tests.each {|test| lines << "    - #{test}"}
+      end
+      
+      print_out lines
+      write_comment_block file,lines
+    end
+  end
+
+protected
+
   def indefinite_article(word)
     (word.to_s.downcase =~ /^[aeoi]/) ? 'An' : 'A'
   end
@@ -35,13 +99,10 @@ class AgileDox
     return false
   end
   
-  def write?
-    @options.include? '--write'
-  end
-
   #write comment to matching file in app/
   def write_comment_block file, lines
-    return unless write?
+    return unless @options[:write]
+    return if lines.size < 2 #no tests
     
     #target file exists ?
     file = test_file_to_app_file file
@@ -49,7 +110,7 @@ class AgileDox
     
    if !File.exists?(file) 
       puts "File: #{file} not found for comment insertion"
-     next
+     return
    end
    
     comment1 = "#AGILEDOX !WILL BE OVERWRITTEN!"
@@ -68,117 +129,47 @@ class AgileDox
   def print_out lines
     puts lines.join "\n"
   end
+end
 
-  def process_tests file_selector
-    tests = FileList[file_selector]
-    tests.each do |file|
-      lines = []
-      
-      #process lines
-      File.foreach(file) do |line|
-        string = '(\'|"){0,1}(.*?)\\1{0,1}'#matches User and '"my" User'
-        case line
-           #test
-          when /^\s*class ([A-Za-z]+)Test/
-            lines << class_name($1)
-          when /^\s*def test_([A-Za-z_]+)/
-            lines << "  - #{$1.gsub(/_/, ' ')}"
-            
-           #spec
-          when /^\s*describe #{string} do/
-            lines << class_name($2)
-          when /^\s*it #{string} do/
-            lines << "  - #{$2}"
+#--------build tasks
+list = {
+  'spec'=>%w{models controllers views helpers},
+  'test'=>%w{units functionals integration}
+}
+
+all_tasks = []
+list.each do |type,tasks|
+  tasks.each do |sub_task|
+    #REAL 
+    #test:xxx:dox OR spec:xxx:dox
+    namespace type do
+      namespace sub_task do
+        task :dox do
+          folder = sub_task.sub(/(unit|functional)s/,'\1')#cut off 's'
+          file_selector = "#{type}/#{folder}/**/*_#{type}.rb"
+          
+          dox = AgileDox.new agiledox_options
+          folder == 'functional' && agiledox_options[:list_nested_actions] ? 
+            dox.process_tests_with_nested_actions(file_selector) : 
+            dox.process_tests(file_selector)  
         end
       end
-      
-      print_out lines
-      write_comment_block file, lines
-    end
-  end
-
-  def process_tests_with_nested_actions file_selector
-    test_files = FileList[file_selector]
-    #collect dox for every action
-    test_files.each do |file|
-      lines = []
-      actions = {}
-      
-      #process lines
-      File.foreach(file) do |line|
-        case line
-          when /^\s*class ([A-Za-z]+)Test/
-            lines << class_name($1 + "'s")
-          when /^\s*def test_([A-Za-z]+)_([A-Za-z_]+)/
-            actions[$1] ||= []
-            actions[$1] << $2.gsub(/_/, ' ')
-        end
-      end
-      
-      #collect action results
-      actions.each do |action,tests|
-        lines << "  '#{action}' action:" 
-        tests.each {|test| lines << "    - #{test}"}
-      end
-      
-      print_out lines
-      write_comment_block file,lines
-    end
-  end
-end
-
-#TODO redundancy my ass... 
-#generate rake task from an array of file_selectors
-
-#call via rake dox:xxx
-namespace :dox do
-  #test
-  task :units =>        'test:dox:units'
-  task :functionals => 'test:dox:functionals'
-  task :integration => 'test:dox:integration'
-  
-  #spec
-  task :models =>       'spec:dox:models'
-  task :controllers =>  'spec:dox:controllers'
-  task :views =>        'spec:dox:views'
-  task :helpers =>      'spec:dox:helpers'
-end
-task :dox => ['dox:units', 'dox:functionals','dox:models','dox:controllers','dox:views','dox:helpers']
-
-#call via test:dox:xxx or spec:dox:xxx
-dox = AgileDox.new [] #TODO no writing for now...
-namespace :test do
-  task :dox => ['dox:units', 'dox:functionals']
-  namespace :dox do
-    task :units do
-      dox.process_tests 'test/unit/**/*_test.rb'
-    end
-    task :functionals do
-      dox.process_tests_with_nested_actions 'test/functional/**/*_test.rb'
-    end
-    task :integration do
-      dox.process_tests 'test/integration/**/*_test.rb'
-    end
-  end
-end
-
-namespace :spec do
-  task :dox => ['dox:models', 'dox:controllers','dox:views','dox:helpers']
-  namespace :dox do
-    task :models do
-      dox.process_tests 'spec/models/**/*_spec.rb'
     end
     
-    task :controllers do
-      dox.process_tests 'spec/controllers/**/*_spec.rb'
+    #LINKS
+    #dox:xxx TO test:xxx:dox OR spec:xxx:dox
+    real_task = "#{type}:#{sub_task}:dox"
+    namespace :dox do
+      task sub_task.intern => real_task 
     end
-      
-    task :views do
-      dox.process_tests 'spec/views/**/*_spec.rb'
-    end
+    
+    all_tasks << real_task
+  end
   
-    task :helpers do
-      dox.process_tests 'spec/helpers/**/*_spec.rb'
-    end
+  #collective tasks test:dox = test:units:dox + test:functionals:dox + ...
+  namespace type do
+    task :dox => tasks.collect {|x| "#{x}:dox"}
   end
 end
+    
+task :dox => all_tasks
