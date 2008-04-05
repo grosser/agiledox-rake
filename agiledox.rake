@@ -135,6 +135,7 @@ namespace :dox do
   #test
   task :units =>        'test:dox:units'
   task :functionals => 'test:dox:functionals'
+  task :integration => 'test:dox:integration'
   
   #spec
   task :models =>       'spec:dox:models'
@@ -154,6 +155,9 @@ namespace :test do
     end
     task :functionals do
       dox.process_tests_with_nested_actions 'test/functional/**/*_test.rb'
+    end
+    task :integration do
+      dox.process_tests 'test/integration/**/*_test.rb'
     end
   end
 end
