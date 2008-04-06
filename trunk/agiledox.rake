@@ -1,9 +1,15 @@
-#version 0.3
+#version 0.4
 #grosser.michael>AT<gmail>DOT<com
 #code.google.com/p/agiledox-rake
+#
+#rake dox
+#rake test:dox
+#rake test:units:dox
+#rake spec:models:dox
+
 agiledox_options = {
-  :write => true,
-  :list_nested_actions => true, #for test:functionals
+  :write => false, #default: false
+  :list_nested_actions => true, #for test:functionals, default: true
 }
 
 
@@ -15,61 +21,64 @@ class AgileDox
   def process_tests file_selector
     tests = FileList[file_selector]
     tests.each do |file|
-      lines = []
-      
-      #process lines
-      File.foreach(file) do |line|
-        string_rex = '(\'|"){0,1}(.*?)\\1{0,1}'#matches User and '"my" User'
-        case line
-           #test
-          when /^\s*class ([^\s]+)Test/
-            lines << class_name($1)
-          when /^\s*def test_([^\s]+)/
-            lines << "  - #{$1.gsub(/_/, ' ')}"
-            
-           #spec
-          when /^\s*describe #{string_rex} do/
-            lines << class_name($2)
-          when /^\s*it #{string_rex} do/
-            lines << "  - #{$2}"
-        end
-      end
-      
-      print_out lines
-      write_comment_block file, lines
+      needs_nesting?(file) ? process_with_nested_actions(file) : process_simple(file)
     end
   end
-
-  def process_tests_with_nested_actions file_selector
-    test_files = FileList[file_selector]
-    #collect dox for every action
-    test_files.each do |file|
-      lines = []
-      actions = {}
-      
-      #process lines
-      File.foreach(file) do |line|
-        case line
-          when /^\s*class ([^\s_]+)Test/
-            lines << class_name($1 + "'s")
-          when /^\s*def test_([^\s_]+)_([^\s]+)/
-            actions[$1] ||= []
-            actions[$1] << $2.gsub(/_/, ' ')
-        end
-      end
-      
-      #collect action results
-      actions.each do |action,tests|
-        lines << "  '#{action}' action:" 
-        tests.each {|test| lines << "    - #{test}"}
-      end
-      
-      print_out lines
-      write_comment_block file,lines
-    end
-  end
-
+  
 protected
+
+  def needs_nesting? file
+    @options[:list_nested_actions] && file =~ /test\/functional\//
+  end
+  
+  def process_simple file
+    lines = []
+    #process lines
+    File.foreach(file) do |line|
+      string_rex = '(\'|"){0,1}(.*?)\\1{0,1}'#matches User and '"my" User'
+      case line
+         #test
+        when /^\s*class ([^\s]+)Test/
+          lines << class_name($1)
+        when /^\s*def test_([^\s]+)/
+          lines << "  - #{$1.gsub(/_/, ' ')}"
+          
+         #spec
+        when /^\s*describe #{string_rex} do/
+          lines << class_name($2)
+        when /^\s*it #{string_rex} do/
+          lines << "  - #{$2}"
+      end
+    end
+    
+    print_out lines
+    write_comment_block file, lines
+  end
+
+  def process_with_nested_actions file
+    lines = []
+    actions = {}
+    
+    #process lines
+    File.foreach(file) do |line|
+      case line
+        when /^\s*class ([^\s_]+)Test/
+          lines << class_name($1 + "'s")
+        when /^\s*def test_([^\s_]+)_([^\s]+)/
+          actions[$1] ||= []
+          actions[$1] << $2.gsub(/_/, ' ')
+      end
+    end
+    
+    #collect action results
+    actions.each do |action,tests|
+      lines << "  '#{action}' action:" 
+      tests.each {|test| lines << "    - #{test}"}
+    end
+    
+    print_out lines
+    write_comment_block file,lines
+  end
 
   def indefinite_article(word)
     (word.to_s.downcase =~ /^[aeoi]/) ? 'An' : 'A'
@@ -82,19 +91,16 @@ protected
   
   def test_file_to_app_file file
     translations = {
-      #test
-     'unit'=>'models',
-     'functional'=>'controllers',
-     
-     #spec
-     'models'=>'models',
-     'controllers'=>'controllers',
+     'models'=>['unit','models'],
+     'controllers'=>['functional','controllers']
     } 
     
-    translations.each do |test, app|
-      rex = /(test|spec)\/#{test}\/(.*)_\1.rb/
-      next unless file =~ rex
-      return file.sub!(rex) {"app/#{app}/#{$2}.rb"}
+    translations.each do |app_folder, test_folders|
+      test_folders.each do |folder|
+        rex = /(test|spec)\/#{folder}\/(.*)_\1.rb/
+        next unless file =~ rex
+        return file.sub!(rex) {"app/#{app_folder}/#{$2}.rb"}
+      end
     end
     return false
   end
@@ -108,10 +114,10 @@ protected
     file = test_file_to_app_file file
     return if file == false #could not translate to app file
     
-   if !File.exists?(file) 
+    if !File.exists?(file) 
       puts "File: #{file} not found for comment insertion"
-     return
-   end
+      return
+    end
    
     comment1 = "#AGILEDOX !WILL BE OVERWRITTEN!"
     comment2 = "#AGILEDOX END"
@@ -137,7 +143,7 @@ list = {
   'test'=>%w{units functionals integration}
 }
 
-all_tasks = []
+dox = AgileDox.new agiledox_options
 list.each do |type,tasks|
   tasks.each do |sub_task|
     #REAL 
@@ -146,12 +152,7 @@ list.each do |type,tasks|
       namespace sub_task do
         task :dox do
           folder = sub_task.sub(/(unit|functional)s/,'\1')#cut off 's'
-          file_selector = "#{type}/#{folder}/**/*_#{type}.rb"
-          
-          dox = AgileDox.new agiledox_options
-          folder == 'functional' && agiledox_options[:list_nested_actions] ? 
-            dox.process_tests_with_nested_actions(file_selector) : 
-            dox.process_tests(file_selector)  
+          dox.process_tests "#{type}/#{folder}/**/*_#{type}.rb"
         end
       end
     end
@@ -162,14 +163,14 @@ list.each do |type,tasks|
     namespace :dox do
       task sub_task.intern => real_task 
     end
-    
-    all_tasks << real_task
   end
   
-  #collective tasks test:dox = test:units:dox + test:functionals:dox + ...
+  #general tasks test:dox
   namespace type do
-    task :dox => tasks.collect {|x| "#{x}:dox"}
+    task :dox do
+      dox.process_tests("#{type}/**/**/*_#{type}.rb")
+    end
   end
 end
     
-task :dox => all_tasks
+task :dox => ['test:dox','spec:dox']
